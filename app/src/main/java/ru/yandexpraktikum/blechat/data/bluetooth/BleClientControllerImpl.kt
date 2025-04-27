@@ -1,7 +1,12 @@
 package ru.yandexpraktikum.blechat.data.bluetooth
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
@@ -16,6 +21,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import ru.yandexpraktikum.blechat.domain.bluetooth.BleClientController
 import ru.yandexpraktikum.blechat.domain.model.ScannedBluetoothDevice
 import ru.yandexpraktikum.blechat.utils.checkForConnectPermission
@@ -26,10 +33,13 @@ class BleClientControllerImpl @Inject constructor(
     private val bluetoothAdapter: BluetoothAdapter?,
     private val locationManager: LocationManager,
     private val viewModelScope: CoroutineScope,
-): BleClientController {
+) : BleClientController {
 
     private val bleScanner by lazy {
         bluetoothAdapter?.bluetoothLeScanner
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
     }
 
     private val _isBluetoothEnabled = MutableStateFlow(false)
@@ -58,7 +68,10 @@ class BleClientControllerImpl @Inject constructor(
 
     override fun updateLocationState() {
         try {
-            _isLocationEnabled.value = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            _isLocationEnabled.value =
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(
+                    LocationManager.NETWORK_PROVIDER
+                )
         } catch (e: Exception) {
             Log.e("BLE", "Failed to initialize Location state", e)
         }
@@ -146,7 +159,27 @@ class BleClientControllerImpl @Inject constructor(
     }
 
     override fun connectToDevice(device: ScannedBluetoothDevice): Boolean {
-        TODO()
+        var foundedDevice: BluetoothDevice? = null
+        var characteristic: BluetoothGattCharacteristic? = null
+
+        context.checkForConnectPermission {
+            foundedDevice = bluetoothAdapter?.bondedDevices?.find {
+                it.address == device.address
+            }
+        }
+
+        return try {
+            context.checkForConnectPermission {
+                viewModelScope.launch {
+                    withTimeout(CONNECTION_TIMEOUT) {
+                        foundedDevice?.connectGatt(context, true, gattCallback)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, e.message.toString())
+            false
+        } as Boolean
     }
 
     override suspend fun sendMessage(message: String, deviceAddress: String): Boolean {
@@ -159,5 +192,10 @@ class BleClientControllerImpl @Inject constructor(
 
     override fun release() {
         closeConnection()
+    }
+
+    private companion object {
+        val TAG = BleClientControllerImpl::class.simpleName
+        const val CONNECTION_TIMEOUT = 5_000L
     }
 }
