@@ -5,7 +5,6 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
-import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -26,6 +25,8 @@ import kotlinx.coroutines.withTimeout
 import ru.yandexpraktikum.blechat.domain.bluetooth.BleClientController
 import ru.yandexpraktikum.blechat.domain.model.ScannedBluetoothDevice
 import ru.yandexpraktikum.blechat.utils.checkForConnectPermission
+import ru.yandexpraktikum.blechat.utils.notifyCharUUID
+import ru.yandexpraktikum.blechat.utils.serviceUUID
 import javax.inject.Inject
 
 class BleClientControllerImpl @Inject constructor(
@@ -39,7 +40,7 @@ class BleClientControllerImpl @Inject constructor(
         bluetoothAdapter?.bluetoothLeScanner
     }
 
-    private var currentGatt : BluetoothGatt? = null
+    private var currentGatt: BluetoothGatt? = null
 
     private val _isBluetoothEnabled = MutableStateFlow(false)
     override val isBluetoothEnabled: StateFlow<Boolean>
@@ -75,9 +76,22 @@ class BleClientControllerImpl @Inject constructor(
                             }
                         }
                     }
+
                     BluetoothProfile.STATE_DISCONNECTED -> {
                         closeConnection()
                     }
+                }
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
+            super.onServicesDiscovered(gatt, status)
+            val service = gatt?.getService(serviceUUID)
+
+            val notifyCharacteristic = service?.getCharacteristic(notifyCharUUID)
+            if (notifyCharacteristic != null) {
+                context.checkForConnectPermission {
+                    gatt.setCharacteristicNotification(notifyCharacteristic, true)
                 }
             }
         }
