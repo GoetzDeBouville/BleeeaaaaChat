@@ -39,7 +39,7 @@ import ru.yandexpraktikum.blechat.utils.advertiseLauncher
 import ru.yandexpraktikum.blechat.utils.bluetoothLauncher
 import ru.yandexpraktikum.blechat.utils.connectLauncher
 
-
+@Suppress("t")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannedDevicesListScreen(
@@ -167,6 +167,7 @@ fun ScannedDevicesListScreen(
     }
 }
 
+@Suppress("t")
 @Composable
 fun ScanningButton(
     checkLocation: () -> Unit,

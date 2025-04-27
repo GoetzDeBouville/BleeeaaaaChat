@@ -140,6 +140,7 @@ class BleServerControllerImpl @Inject constructor(
         }
     }
 
+    @Suppress("t")
     override fun startServer() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
@@ -258,6 +259,7 @@ class BleServerControllerImpl @Inject constructor(
         }
     }
 
+    @Suppress("t")
     override suspend fun sendServerMessage(message: String, deviceAddress: String): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && ActivityCompat.checkSelfPermission(
                 context,
