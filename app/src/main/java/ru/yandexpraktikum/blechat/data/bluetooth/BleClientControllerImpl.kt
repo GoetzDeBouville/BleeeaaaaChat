@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import ru.yandexpraktikum.blechat.domain.bluetooth.BleClientController
+import ru.yandexpraktikum.blechat.domain.model.Message
 import ru.yandexpraktikum.blechat.domain.model.ScannedBluetoothDevice
 import ru.yandexpraktikum.blechat.utils.checkForConnectPermission
 import ru.yandexpraktikum.blechat.utils.notifyCharUUID
@@ -92,6 +94,36 @@ class BleClientControllerImpl @Inject constructor(
             if (notifyCharacteristic != null) {
                 context.checkForConnectPermission {
                     gatt.setCharacteristicNotification(notifyCharacteristic, true)
+                }
+            }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt?,
+            characteristic: BluetoothGattCharacteristic?
+        ) {
+            super.onCharacteristicChanged(gatt, characteristic)
+            context.checkForConnectPermission {
+                gatt?.let {
+                    val value = characteristic?.value
+                    if (value != null) {
+                        val message = String(value, Charsets.UTF_8)
+                        _scannedDevices.update { devices ->
+                            devices.map {
+                                if (it.address == gatt.device.address) {
+                                    it.copy(
+                                        messages = it.messages + Message(
+                                            text = message.toString(),
+                                            senderAddress = gatt.device?.address.toString(),
+                                            isFromLocalUser = false
+                                        )
+                                    )
+                                } else {
+                                    it
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -205,30 +237,15 @@ class BleClientControllerImpl @Inject constructor(
     }
 
     override fun connectToDevice(device: ScannedBluetoothDevice): Boolean {
-        var foundedDevice: BluetoothDevice? = null
-
         context.checkForConnectPermission {
-            foundedDevice = bluetoothAdapter?.bondedDevices?.find {
-                it.address == device.address
+            try {
+                val remoteDevice = bluetoothAdapter?.getRemoteDevice(device.address)
+                currentGatt = remoteDevice?.connectGatt(context, false, gattCallback)
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "Device not found with provided address. Unable to connect.")
             }
         }
-
-        return try {
-            context.checkForConnectPermission {
-                viewModelScope.launch {
-                    withTimeout(TIMEOUT) {
-                        runCatching {
-                            foundedDevice?.connectGatt(context, true, gattCallback)
-                        }.onFailure { e ->
-                            Log.e(TAG, e.message.toString())
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, e.message.toString())
-            false
-        } as Boolean
+        return currentGatt != null
     }
 
     override suspend fun sendMessage(message: String, deviceAddress: String): Boolean {
