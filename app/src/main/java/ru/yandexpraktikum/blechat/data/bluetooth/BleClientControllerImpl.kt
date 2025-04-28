@@ -2,7 +2,6 @@ package ru.yandexpraktikum.blechat.data.bluetooth
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
@@ -29,6 +28,7 @@ import ru.yandexpraktikum.blechat.domain.model.ScannedBluetoothDevice
 import ru.yandexpraktikum.blechat.utils.checkForConnectPermission
 import ru.yandexpraktikum.blechat.utils.notifyCharUUID
 import ru.yandexpraktikum.blechat.utils.serviceUUID
+import ru.yandexpraktikum.blechat.utils.writeCharUUID
 import javax.inject.Inject
 
 class BleClientControllerImpl @Inject constructor(
@@ -52,11 +52,10 @@ class BleClientControllerImpl @Inject constructor(
     override val isLocationEnabled: StateFlow<Boolean>
         get() = _isLocationEnabled.asStateFlow()
 
-
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
             super.onConnectionStateChange(gatt, status, newState)
-            if (status != BluetoothGatt.GATT_SUCCESS) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
 
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
@@ -91,6 +90,7 @@ class BleClientControllerImpl @Inject constructor(
             val service = gatt?.getService(serviceUUID)
 
             val notifyCharacteristic = service?.getCharacteristic(notifyCharUUID)
+
             if (notifyCharacteristic != null) {
                 context.checkForConnectPermission {
                     gatt.setCharacteristicNotification(notifyCharacteristic, true)
@@ -242,14 +242,39 @@ class BleClientControllerImpl @Inject constructor(
                 val remoteDevice = bluetoothAdapter?.getRemoteDevice(device.address)
                 currentGatt = remoteDevice?.connectGatt(context, false, gattCallback)
             } catch (e: IllegalArgumentException) {
-                Log.e(TAG, "Device not found with provided address. Unable to connect.")
+                Log.e(TAG, "Device not found with provided address. Unable to connect.\n${e.message}")
             }
         }
         return currentGatt != null
     }
 
+    @Suppress("MissingPermission")
     override suspend fun sendMessage(message: String, deviceAddress: String): Boolean {
-        TODO()
+        val gattService = currentGatt?.getService(serviceUUID)
+        val characteristic = gattService?.getCharacteristic(writeCharUUID)
+
+        return if (characteristic != null) {
+            characteristic.setValue(message.toByteArray(Charsets.UTF_8))
+            currentGatt?.writeCharacteristic(characteristic)
+            _scannedDevices.update { devices ->
+                devices.map {
+                    if (it.address == deviceAddress) {
+                        it.copy(
+                            messages = it.messages + Message(
+                                message,
+                                bluetoothAdapter?.address ?: "",
+                                isFromLocalUser = true
+                            )
+                        )
+                    } else {
+                        it
+                    }
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     override fun closeConnection() {
