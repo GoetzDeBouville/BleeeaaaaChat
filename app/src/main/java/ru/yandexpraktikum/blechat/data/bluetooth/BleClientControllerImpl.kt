@@ -22,9 +22,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import ru.yandexpraktikum.blechat.R
 import ru.yandexpraktikum.blechat.domain.bluetooth.BleClientController
 import ru.yandexpraktikum.blechat.domain.model.Message
 import ru.yandexpraktikum.blechat.domain.model.ScannedBluetoothDevice
+import ru.yandexpraktikum.blechat.presentation.notifications.NotificationsHelper
 import ru.yandexpraktikum.blechat.utils.checkForConnectPermission
 import ru.yandexpraktikum.blechat.utils.notifyCharUUID
 import ru.yandexpraktikum.blechat.utils.serviceUUID
@@ -36,6 +38,7 @@ class BleClientControllerImpl @Inject constructor(
     private val bluetoothAdapter: BluetoothAdapter?,
     private val locationManager: LocationManager,
     private val viewModelScope: CoroutineScope,
+    private val notificationsHelper: NotificationsHelper
 ) : BleClientController {
 
     private val bleScanner by lazy {
@@ -98,28 +101,40 @@ class BleClientControllerImpl @Inject constructor(
             }
         }
 
+        @Suppress("t")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt?,
             characteristic: BluetoothGattCharacteristic?
         ) {
             super.onCharacteristicChanged(gatt, characteristic)
-            context.checkForConnectPermission {
-                gatt?.let {
-                    val value = characteristic?.value
-                    if (value != null) {
-                        val message = String(value, Charsets.UTF_8)
-                        _scannedDevices.update { devices ->
-                            devices.map {
-                                if (it.address == gatt.device.address) {
-                                    it.copy(
-                                        messages = it.messages + Message(
-                                            text = message.toString(),
-                                            senderAddress = gatt.device?.address.toString(),
-                                            isFromLocalUser = false
-                                        )
-                                    )
-                                } else {
-                                    it
+
+            if (characteristic?.uuid == notifyCharUUID) {
+                context.checkForConnectPermission {
+                    gatt?.let {
+                        val value = characteristic.value
+                        if (value != null) {
+                            val message = String(value, Charsets.UTF_8)
+
+                            notificationsHelper.notifyOnMessageReceived(
+                                title = context.getString(R.string.new_message),
+                                message = message
+                            )
+
+                            viewModelScope.launch {
+                                _scannedDevices.update { devices ->
+                                    devices.map {
+                                        if (it.address == gatt.device.address) {
+                                            it.copy(
+                                                messages = it.messages + Message(
+                                                    text = message.toString(),
+                                                    senderAddress = gatt.device?.address.toString(),
+                                                    isFromLocalUser = false
+                                                )
+                                            )
+                                        } else {
+                                            it
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -242,7 +257,10 @@ class BleClientControllerImpl @Inject constructor(
                 val remoteDevice = bluetoothAdapter?.getRemoteDevice(device.address)
                 currentGatt = remoteDevice?.connectGatt(context, false, gattCallback)
             } catch (e: IllegalArgumentException) {
-                Log.e(TAG, "Device not found with provided address. Unable to connect.\n${e.message}")
+                Log.e(
+                    TAG,
+                    "Device not found with provided address. Unable to connect.\n${e.message}"
+                )
             }
         }
         return currentGatt != null
